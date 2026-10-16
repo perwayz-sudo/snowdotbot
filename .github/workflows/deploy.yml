@@ -29,8 +29,10 @@ jobs:
           cache: npm
       - run: npm ci
       - name: Push modules and apply migrations
+        # CI has no .tgcloud sync state, so the push must be forced — the repo
+        # is the source of truth for this bot (local and CI deploy the same).
         run: |
-          npx tgcloud push
+          npx tgcloud push --force
           npx tgcloud migrate --yes
         env:
           TGCLOUD_TOKEN: ${{ secrets.TGCLOUD_TOKEN }}
