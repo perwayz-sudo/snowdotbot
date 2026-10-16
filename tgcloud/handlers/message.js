@@ -58,6 +58,14 @@ import { parseEventArgs, nextOccurrence, dueContacts, prettyOccurrence } from '.
 import { JOKES, WATCH_GENRES, WATCH_LABELS, randomFrom, riddleOfDay, slotsSpin } from '../lib/content.js';
 import { newGame, renderGame } from '../lib/cards.js';
 import { newPokerGame, renderPoker } from '../lib/poker.js';
+import {
+  BOT_COMMANDS,
+  BOT_COMMANDS_GROUP,
+  funKeyboard,
+  hideKeyboard,
+  mainKeyboard,
+  menuAction,
+} from '../lib/menu.js';
 import { suggestGifts } from '../lib/gifts.js';
 import { buildChecklist, formatChecklist } from '../lib/packing.js';
 import {
@@ -65,12 +73,17 @@ import {
   buildBudgetReply,
   buildCommuteLine,
   buildEventsList,
+  buildFunPrompt,
   buildGiftIdeas,
+  buildMenuPrompt,
+  buildPollHint,
   buildRainReply,
   buildRiddleOfDay,
+  buildSetupHint,
   buildSkyReply,
   buildSlotsReply,
   buildTravelForecast,
+  buildTravelHint,
   buildTravelTypical,
   buildUVLine,
   buildWatchReply,
@@ -83,9 +96,10 @@ const PACK_USAGE = '🧳 Usage: /pack <city> <date> — e.g. /pack Tokyo Jul 10'
 function helpText(name) {
   return (
     `👋 Hi${name ? ' ' + name : ''}! I'm your personal bot — weather plus a small toolkit.\n\n` +
+    `☰ No need to type commands — tap the buttons at the bottom. /menu brings the bar back, /menu hide removes it.\n\n` +
     `☀️ Report: from ${SEND_HOUR}:00 (your city's time) I send the morning report the next time you message — once a day. ` +
     `Rain, temperature, stargazing, Friday weekend and Sunday recap alerts arrive the same way.\n` +
-    `📌 Set your city: share your location (📎 → Location) or /city Berlin.\n\n` +
+    `📌 Set your city: tap 📍 My location, or send /city Berlin.\n\n` +
     `Weather & advice:\n` +
     `/report · /rain · /air · /uv · /workout · /sky\n\n` +
     `Fun:\n` +
@@ -98,7 +112,7 @@ function helpText(name) {
     `Travel & money:\n` +
     `/weather Tokyo Jul 10 · /pack Tokyo Jul 10\n` +
     `/trip Tokyo · /spent 25 lunch · /budget\n\n` +
-    `Setup: /commute 07:45 · /limits -5 30 · /stop\n` +
+    `Setup: /commute 07:45 · /limits -5 30 · /menu · /stop\n` +
     `Groups: /confess on — anonymous confessions via DM`
   );
 }
@@ -161,10 +175,25 @@ export default async function (message, ctx) {
   const requireSub = async () => {
     sub = await getSubscriber(chatId);
     if (!sub || sub.lat == null || sub.lon == null) {
-      await reply('📌 First tell me your city — share your location (📎 → Location) or send /city <name>.');
+      await reply('📌 First tell me your city — tap 📍 My location in the menu, or send /city <name>.');
       return null;
     }
     return sub;
+  };
+
+  // Register the ☰ command list with Telegram (idempotent; runs on /start and
+  // /menu at most once each).
+  let commandsSynced = false;
+  const ensureCommands = async () => {
+    if (commandsSynced) return;
+    commandsSynced = true;
+    try {
+      await api.setMyCommands({ commands: BOT_COMMANDS });
+      await api.setMyCommands({ commands: BOT_COMMANDS_GROUP, scope: { type: 'all_group_chats' } });
+    } catch (err) {
+      commandsSynced = false;
+      console.warn('setMyCommands failed', err && err.message);
+    }
   };
   // Remember that an on-demand answer already covered a heartbeat event.
   const markSeen = async (key) => {
@@ -217,26 +246,68 @@ export default async function (message, ctx) {
     }
   }
 
-  const command = parseCommand(message.text);
+  const parsedCmd = parseCommand(message.text);
+  let command = parsedCmd;
+  let menuHandled = false;
+
+  // Menu-bar taps arrive as plain text — translate them back into commands.
+  if (!parsedCmd && message.text && !message.photo && !message.video) {
+    const act = menuAction(message.text);
+    if (act) {
+      if (act.cmd) {
+        command = { cmd: act.cmd, args: '' };
+      } else if (act.fun) {
+        await show(buildFunPrompt(), { reply_markup: funKeyboard() });
+        menuHandled = true;
+      } else if (act.main) {
+        await show(buildMenuPrompt(), { reply_markup: mainKeyboard() });
+        menuHandled = true;
+      } else if (act.hide) {
+        await show('🙈 Menu hidden — send /menu to bring it back.', { reply_markup: hideKeyboard() });
+        menuHandled = true;
+      } else if (act.info === 'travel') {
+        await reply(buildTravelHint());
+        menuHandled = true;
+      } else if (act.info === 'setup') {
+        await reply(buildSetupHint());
+        menuHandled = true;
+      } else if (act.info === 'poll') {
+        await reply(buildPollHint());
+        menuHandled = true;
+      }
+    }
+  }
 
   if (command) {
     switch (command.cmd) {
       case 'start': {
         sub = await upsertSubscriber(chatId, { name });
+        await ensureCommands();
         if (sub.lat != null && sub.lon != null) {
-          await reply(
+          await show(
             `Welcome back${name ? ', ' + name : ''}! ☀️ Your city is ${sub.city}. ` +
-            `Send me anything after ${SEND_HOUR}:00 and today's report lands right away — /report any time.`
+            `Tap a button below, or send me anything after ${SEND_HOUR}:00 and today's report lands right away — /report any time.`,
+            { reply_markup: mainKeyboard() },
           );
         } else {
-          await reply(helpText(name));
+          await show(helpText(name), { reply_markup: mainKeyboard() });
         }
         break;
       }
 
       case 'help':
-        await reply(helpText(name));
+        await show(helpText(name), { reply_markup: mainKeyboard() });
         break;
+
+      case 'menu': {
+        if (command.args.trim().toLowerCase() === 'hide') {
+          await show('🙈 Menu hidden — send /menu to bring it back.', { reply_markup: hideKeyboard() });
+          break;
+        }
+        await ensureCommands();
+        await show(buildMenuPrompt(), { reply_markup: mainKeyboard() });
+        break;
+      }
 
       case 'city': {
         if (!command.args) {
@@ -912,12 +983,12 @@ export default async function (message, ctx) {
       default:
         await reply(helpText(name));
     }
-  } else if (message.text && !message.photo && !message.video) {
+  } else if (!menuHandled && message.text && !message.photo && !message.video) {
     // Plain text: a nudge when the city is missing, otherwise stay quiet.
     if (!sub) {
-      await reply(helpText(name));
+      await show(helpText(name), { reply_markup: mainKeyboard() });
     } else if (sub.lat == null || sub.lon == null) {
-      await reply('📌 I still need your city — share your location (📎 → Location) or send /city <name>.');
+      await reply('📌 I still need your city — tap 📍 My location in the menu, or send /city <name>.');
     }
   }
 

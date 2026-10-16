@@ -302,6 +302,43 @@ export function buildWatchGenres(genres) {
   return `🎬 What should you watch tonight?\n\nPick a mood:`;
 }
 
+// --- the menu bar ------------------------------------------------------------
+
+export function buildMenuPrompt() {
+  return (
+    '☰ Menu — tap a button below instead of typing.\n' +
+    'The bar stays put; hide it with /menu hide, bring it back with /menu.'
+  );
+}
+
+export function buildFunPrompt() {
+  return '🎲 Fun — pick something:';
+}
+
+export function buildTravelHint() {
+  return (
+    '🧳 Trip planning:\n' +
+    '/weather Tokyo Jul 10 — forecast for any city + date\n' +
+    '/pack Tokyo Jul 10 — auto packing checklist\n' +
+    '/trip Tokyo · /spent 25 lunch · /budget — trip money'
+  );
+}
+
+export function buildSetupHint() {
+  return (
+    '⚙️ Setup:\n' +
+    '📌 Your city: tap 📍 My location, or send /city Berlin\n' +
+    '🚴 /commute 07:45 — departure-time report (off with /commute off)\n' +
+    '🌡 /limits -5 30 — custom temperature alerts\n' +
+    '🙈 /menu hide — remove the button bar\n' +
+    '🛑 /stop — no more reports or alerts'
+  );
+}
+
+export function buildPollHint() {
+  return '📊 Usage: /poll Question | option A | option B — 2 to 10 options, separated by |.';
+}
+
 
 function round1(v) {
   return Number.isFinite(v) ? Math.round(v * 10) / 10 : '—';

@@ -164,13 +164,19 @@ means *the next time the bot runs* (any message in the chat, or `npm run pulse`
 if a scheduler is ever added).
 
 - **`tgcloud/handlers/message.js`** — every command and message. Weather:
-  `/start /help /city /report /rain /air /uv /workout /sky /commute /limits
-  /weather /stop` + location sharing. Fun: `/roll /coin /flip /slots /joke
-  /riddle /blackjack /watch /poll`. Reminders: `/event /events /contact
-  /contacted /crm /memory` (a sent photo/video is saved and replayed on its
-  anniversary). Social: `/confess` (group admins enable; DMs post anonymously).
-  Money/travel: `/trip /spent /budget /pack`. The trailing `heartbeat(sub)`
-  must stay last; paths that already sent a fresh report set `heartbeatDone`.
+  `/start /help /menu /city /report /rain /air /uv /workout /sky /commute
+  /limits /weather /stop` + location sharing. Fun: `/roll /coin /flip /slots
+  /joke /riddle /blackjack /poker /watch /poll`. Reminders: `/event /events
+  /contact /contacted /crm /memory` (a sent photo/video is saved and replayed
+  on its anniversary). Social: `/confess` (group admins enable; DMs post
+  anonymously). Money/travel: `/trip /spent /budget /pack`. The tappable
+  **menu bar** comes from `lib/menu.js`: button labels arrive as plain text and
+  are translated back into commands; `/start`, `/help` and `/menu` (re)attach
+  the bar (they also register Telegram's ☰ command list via `setMyCommands`),
+  `/menu hide` removes it. The trailing `heartbeat(sub)` must stay last; paths
+  that already sent a fresh report set `heartbeatDone`.
+- **`lib/menu.js`** — the menu bar: reply-keyboard layouts, the label → action
+  map, and the ☰ `setMyCommands` lists (private + group variants). Pure.
 - **`tgcloud/handlers/callback_query.js`** — inline-button taps: blackjack
   (`bj:hit` / `bj:stand`, owner-only, edits the message in place and deletes the
   game when done) and the `/watch` genre picker (`watch:<genre>[:again]`).
@@ -215,6 +221,6 @@ if a scheduler is ever added).
   the no-GitHub alternative.)
 
 `schema`, `schedule`, `insights`, `moon`, `travel`, `format`, `content`,
-`cards`, `gifts`, `packing`, `reminders` and `weather-parse` are pure (no SDK
-imports) and unit-tested in plain Node; keep new logic there when possible so
-it stays testable.
+`cards`, `poker`, `gifts`, `packing`, `reminders`, `menu` and `weather-parse`
+are pure (no SDK imports) and unit-tested in plain Node; keep new logic there
+when possible so it stays testable.
