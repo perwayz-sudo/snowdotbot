@@ -157,8 +157,10 @@ The platform manages the bot's webhook for you, derived from your deployed
 
 A personal Telegram bot on the serverless platform: a weather report/alerts app
 plus a small toolkit (fun commands, reminders, travel/money helpers). Weather
-work is throttled and sized: one small (48 h) Open-Meteo fetch serves a burst
-of interactions, the big payload is only fetched when the report / Friday
+work is throttled and sized: forecasts prefer OpenWeather (2.5 endpoints; its
+key lives in the DB via `endpoints/setkey.js`, never in this public repo) with
+Open-Meteo as the keyless fallback and the history source — one fetch serves a
+burst of interactions, the deep payload is only fetched when the Friday
 preview / Sunday recap can fire, and the AQI call rides in parallel. The
 reminder extras (birthdays, Memory Lane, overdue friends) ride the same
 heartbeat. Telegram Serverless has **no cron** — the user chose a *git-based*
@@ -210,16 +212,20 @@ one: a GitHub Actions workflow runs `npx tgcloud run endpoints/pulse` every
 - **`lib/format.js`** — every message text. Pure. The report's original block
   follows the user's spec exactly — extras go *below* the 3-day forecast, never
   reformat the block itself.
-- **`lib/weather.js` / `lib/weather-parse.js`** — Open-Meteo forecast in two
-  sizes: `quick` (48 h, no history — every on-demand command: /rain, /air, /uv,
-  /workout, /sky, /commute and the alert checks) and full (current + 3 days
-  hourly + 7 days history + 8 days daily — the report's 3-day list, the Friday
-  preview, the Sunday recap). City-local times. Plus air quality, travel/
-  archive calls; BigDataCloud reverse geocode. All keyless. `weather-parse` is
-  pure; `weather.js` touches the network only.
+- **`lib/weather.js` / `lib/weather-parse.js`** — the forecast layer.
+  `fetchWeather` prefers OpenWeather 2.5 (current + 5-day/3-hour forecast + UV;
+  every payload carries a `source` tag) whenever the `settings` table holds a
+  key, and falls back to Open-Meteo on any failure — which also serves the deep
+  payload (`fetchWeatherFull`: 7 days of history + 8 days of daily, for the
+  Friday preview and Sunday recap; OpenWeather's free tier has neither) and the
+  `quick` 48 h payload the on-demand commands (rain / air / uv / workout / sky
+  / commute) size their fallback for. Hourly and daily entries carry the
+  numeric WMO `code` the insights sets match on. City-local times throughout.
+  Plus air quality, travel/archive calls; BigDataCloud reverse geocode.
+  `weather-parse` is pure; `weather.js` touches the network only.
 - **`lib/store.js`** — all database access: `subscribers` (+ `saveHeartbeat`,
   `setTrip`), `events`, `expenses`, `memories`, `contacts`, `games`,
-  `confessions`.
+  `confessions`, `settings` (the OpenWeather key).
 - **`endpoints/pulse.js` + `npm run pulse`** — runs the heartbeat for every
   subscriber: `npx tgcloud run endpoints/pulse` sends the local modules to the
   cloud and runs them there (no deploy needed). The heartbeat's `seen` map
@@ -230,6 +236,13 @@ one: a GitHub Actions workflow runs `npx tgcloud run endpoints/pulse` every
   Serverless → CLI Access). GitHub cron is UTC and can lag a few minutes; the
   dedupe makes that harmless. (Windows Task Scheduler + `npm run pulse` remains
   the no-GitHub alternative.)
+- **`.github/workflows/deploy.yml`** — token-free deploys: `gh workflow run
+  deploy.yml` pushes modules, applies migrations, stores the optional
+  `OPENWEATHER_KEY` secret via `endpoints/setkey`, and runs one pulse — all
+  with the same `TGCLOUD_TOKEN` secret.
+- **`endpoints/setkey.js`** — one tiny admin endpoint: stores the OpenWeather
+  key in `settings` (validated, idempotent) and returns a live probe of the
+  forecast layer (`source: 'openweather'` proves the key works).
 
 `schema`, `schedule`, `insights`, `moon`, `travel`, `format`, `content`,
 `cards`, `poker`, `gifts`, `packing`, `reminders`, `menu` and `weather-parse`

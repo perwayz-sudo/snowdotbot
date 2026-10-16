@@ -2,7 +2,22 @@
 // feature tables (events, expenses, memories, contacts, games, confessions).
 import { db } from 'sdk';
 import { and, eq } from 'sdk/db';
-import { subscribers, events, expenses, memories, contacts, games, confessions } from '../schema.js';
+import { subscribers, events, expenses, memories, contacts, games, confessions, settings } from '../schema.js';
+
+// --- settings (cloud-side config; the OpenWeather key lives here) -----------
+
+export async function getSetting(key) {
+  const row = await db.select().from(settings).where(eq(settings.key, key)).get();
+  return row ? row.value : null;
+}
+
+export async function setSetting(key, value) {
+  await db
+    .insert(settings)
+    .values({ key, value })
+    .onConflictDoUpdate({ target: settings.key, set: { value } })
+    .run();
+}
 
 // --- subscribers ------------------------------------------------------------
 

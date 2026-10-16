@@ -1,0 +1,50 @@
+# Deploys this repo's modules to the bot's cloud environment — the GitHub
+# Actions way, so a deploy never needs the CLI token on your own machine.
+#
+# Run it from the repo's Actions tab or with:
+#   gh workflow run deploy.yml
+#
+# Uses the same TGCLOUD_TOKEN secret as pulse.yml (BotFather → your bot →
+# Serverless → CLI Access). The optional OPENWEATHER_KEY secret is stored in
+# the bot's database (endpoints/setkey) so the forecast layer uses
+# OpenWeather; when it is unset the step is skipped. Neither value ever
+# appears in the logs.
+name: deploy
+
+on:
+  workflow_dispatch: {}
+
+concurrency:
+  group: deploy
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - name: Push modules and apply migrations
+        run: |
+          npx tgcloud push
+          npx tgcloud migrate --yes
+        env:
+          TGCLOUD_TOKEN: ${{ secrets.TGCLOUD_TOKEN }}
+      - name: Store the OpenWeather key (when the secret is set)
+        run: |
+          if [ -n "$OPENWEATHER_KEY" ]; then
+            npx tgcloud run endpoints/setkey "{\"key\":\"$OPENWEATHER_KEY\"}"
+          else
+            echo "OPENWEATHER_KEY secret not set — skipping"
+          fi
+        env:
+          TGCLOUD_TOKEN: ${{ secrets.TGCLOUD_TOKEN }}
+          OPENWEATHER_KEY: ${{ secrets.OPENWEATHER_KEY }}
+      - name: Pulse once (proves the deploy end-to-end)
+        run: npx tgcloud run endpoints/pulse
+        env:
+          TGCLOUD_TOKEN: ${{ secrets.TGCLOUD_TOKEN }}

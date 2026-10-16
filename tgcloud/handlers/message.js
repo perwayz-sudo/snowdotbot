@@ -380,7 +380,7 @@ export default async function (message, ctx) {
             await reply(buildAirReply(
               w.label,
               { ...aqiInfo(air.usAqi), pm25: air.pm25, pm10: air.pm10 },
-              uvNow(w.hourly, localNowOf(w)),
+              uvNow(w.hourly, localNowOf(w)) ?? w.current?.uv ?? null,
               uvInfo(w.today.uv),
             ));
           } catch (err) {
@@ -396,7 +396,7 @@ export default async function (message, ctx) {
         if (s) {
           try {
             const w = await wx(s);
-            await reply(buildUVLine(uvNow(w.hourly, localNowOf(w)), uvInfo(w.today.uv)));
+            await reply(buildUVLine(uvNow(w.hourly, localNowOf(w)) ?? w.current?.uv ?? null, uvInfo(w.today.uv)));
           } catch (err) {
             console.error('uv check failed', err);
             await reply("Couldn't fetch the UV index right now — try again in a minute.");

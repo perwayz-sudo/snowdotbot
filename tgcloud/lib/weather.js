@@ -1,21 +1,28 @@
-// Weather data over HTTP: Open-Meteo (keyless, free) for geocoding, forecasts
-// and history, its air-quality API for AQI, BigDataCloud to name a shared pin.
+// Weather data over HTTP. Forecasts prefer OpenWeather — its key lives in the
+// cloud DB (see endpoints/setkey.js), never in this public repo. Open-Meteo
+// stays as the keyless fallback, the history source (Sunday recap / Friday
+// preview), and the geocoding / travel / archive / air-quality provider.
 import { fetch } from 'sdk';
 import {
   normalizeWeather,
+  normalizeOpenWeather,
   normalizeTravelForecast,
   normalizeArchive,
 } from './weather-parse.js';
+import { getSetting } from './store.js';
 
 const GEO_API = 'https://geocoding-api.open-meteo.com/v1/search';
 const FORECAST_API = 'https://api.open-meteo.com/v1/forecast';
 const AIR_API = 'https://air-quality-api.open-meteo.com/v1/air-quality';
 const ARCHIVE_API = 'https://archive-api.open-meteo.com/v1/archive';
 const REVERSE_API = 'https://api.bigdatacloud.net/data/reverse-geocode-client';
+const OW_API = 'https://api.openweathermap.org/data/2.5';
 
-async function getJson(url) {
+// `label` is what an error names the call by — never pass a URL that carries a
+// secret (the OpenWeather appid).
+async function getJson(url, { label = url } = {}) {
   const res = await fetch(url);
-  if (!res.ok) throw new Error(`GET ${url} failed: ${res.status} ${res.statusText}`);
+  if (!res.ok) throw new Error(`GET ${label} failed: ${res.status} ${res.statusText}`);
   return res.json();
 }
 
@@ -35,16 +42,43 @@ export async function lookupLabel(lat, lon) {
   return data.city || data.locality || data.principalSubdivision || data.countryName || null;
 }
 
-// The forecast payload the heartbeat works from. Two sizes:
+// The OpenWeather key is read once per isolate; undefined = not read yet,
+// null = none stored (the layer simply stays on Open-Meteo).
+let owKey;
+async function openWeatherKey() {
+  if (owKey === undefined) {
+    try {
+      owKey = await getSetting('openweather_key');
+    } catch (err) {
+      console.warn('openweather key lookup failed', err && err.message);
+      owKey = null;
+    }
+  }
+  return owKey;
+}
+
+// One OpenWeather round: current conditions, the 5-day / 3-hour forecast and
+// the UV index (current + the next days' noon values, best effort).
+async function fetchOpenWeather({ lat, lon, label, key }) {
+  const base = `lat=${lat}&lon=${lon}&appid=${key}&units=metric`;
+  const [current, forecast, uvi, uviForecast] = await Promise.all([
+    getJson(`${OW_API}/weather?${base}`, { label: 'openweather/weather' }),
+    getJson(`${OW_API}/forecast?${base}`, { label: 'openweather/forecast' }),
+    getJson(`${OW_API}/uvi?${base}`, { label: 'openweather/uvi' }).catch(() => null),
+    getJson(`${OW_API}/uvi/forecast?${base}&cnt=6`, { label: 'openweather/uvi-forecast' }).catch(() => null),
+  ]);
+  const w = normalizeOpenWeather({ current, forecast, uvi, uviForecast }, { label });
+  return { ...w, source: 'openweather' };
+}
+
+// Open-Meteo's forecast in two sizes:
 //   full  — current + 3 days of hourly + 7 days of history + 8 days of daily:
 //           needs past days (Sunday recap) and a week ahead (Friday preview).
 //   quick — current + 2 days hourly + 2 days daily, no history: the rain,
 //           temperature, stargazing, UV, workout and commute checks only ever
 //           look from now into the next ~2 days, so this is several times
 //           smaller and that much faster to fetch and parse.
-// Either way, times come back in the city's own zone (timezone=auto), and so
-// does the UTC offset used by 8 AM.
-export async function fetchWeather({ lat, lon, label, quick = false }) {
+async function fetchOpenMeteo({ lat, lon, label, quick = false }) {
   const url =
     `${FORECAST_API}?latitude=${lat}&longitude=${lon}` +
     '&current=temperature_2m,apparent_temperature,relative_humidity_2m,wind_speed_10m,weather_code,is_day' +
@@ -55,7 +89,31 @@ export async function fetchWeather({ lat, lon, label, quick = false }) {
     '&timezone=auto&wind_speed_unit=ms' +
     (quick ? '&forecast_days=2' : '&past_days=7&forecast_days=8');
   const data = await getJson(url);
-  return normalizeWeather(data, { label });
+  const w = normalizeWeather(data, { label });
+  return { ...w, source: 'open-meteo' };
+}
+
+// The forecast payload the heartbeat works from: OpenWeather while a key is
+// stored, Open-Meteo otherwise — and always on any OpenWeather failure, so it
+// never takes the weather down. Either way, times come back in the city's own
+// zone, and so does the UTC offset used by 8 AM.
+export async function fetchWeather({ lat, lon, label, quick = false }) {
+  const key = await openWeatherKey();
+  if (key) {
+    try {
+      return await fetchOpenWeather({ lat, lon, label, key });
+    } catch (err) {
+      console.warn('openweather fetch failed — falling back to open-meteo:', err && err.message);
+    }
+  }
+  return fetchOpenMeteo({ lat, lon, label, quick });
+}
+
+// The deep payload: 7 days of history + 8 days of daily. Open-Meteo only —
+// the free OpenWeather tier has neither (used by the Sunday recap and the
+// Friday preview).
+export async function fetchWeatherFull({ lat, lon, label }) {
+  return fetchOpenMeteo({ lat, lon, label, quick: false });
 }
 
 // Air quality for a point: US AQI + particulate matter (µg/m³).

@@ -1,5 +1,13 @@
 import { table, integer, text, real, json, index } from 'sdk/db';
 
+// A tiny key/value store for cloud-side config that must not live in this
+// (public) repo — right now just the OpenWeather API key the forecast layer
+// prefers. See endpoints/setkey.js.
+export const settings = table('settings', {
+  key: text('key').primaryKey(),
+  value: text('value'),
+});
+
 // Your database tables go here as named exports. Deploying this file registers the
 // schema; applying the changes (a migration) updates the database.
 

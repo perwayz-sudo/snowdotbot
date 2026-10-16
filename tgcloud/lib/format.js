@@ -170,10 +170,10 @@ export function buildAirReply(label, air, uvNow, uvToday) {
 }
 
 export function buildUVLine(uvNow, uvToday) {
-  return (
-    `☀️ UV now ${Math.round(uvNow)}` +
-    (uvToday ? ` · today's max ${uvToday.value} (${uvToday.level})${uvToday.advice ? ' — ' + uvToday.advice : ''}` : '')
-  );
+  const parts = [];
+  if (uvNow != null) parts.push(`UV now ${Math.round(uvNow)}`);
+  if (uvToday) parts.push(`today's max ${uvToday.value} (${uvToday.level})${uvToday.advice ? ' — ' + uvToday.advice : ''}`);
+  return `☀️ ${parts.length ? parts.join(' · ') : 'no UV reading right now.'}`;
 }
 
 export function buildRainReply(label, rain) {

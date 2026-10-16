@@ -78,13 +78,16 @@ export function pruneSeen(seen, nowMs, maxAgeMs = 5 * 86400000) {
 //              forecast). Everything else (rain / temp / star pings) fits in
 //              the small 2-day payload.
 //   report   — the morning report looks due; drives the AQI prefetch.
+//   history  — the run must include 7 days of *past* daily data (the Friday
+//              preview looks a week ahead, the Sunday recap a week back):
+//              Open-Meteo's deep payload — OpenWeather's free tier has none.
 //
 // `seen['hb']` stamps the last run; unknown offset (first-ever run) never
 // throttles — it is how the offset gets learned.
 export function heartbeatPlan({ seen, tzOffsetMin, nowMs, forceReport = false }) {
-  if (forceReport) return { throttle: false, full: true, report: true };
+  if (forceReport) return { throttle: false, full: true, report: true, history: false };
   const tz = Number.isFinite(tzOffsetMin) ? tzOffsetMin : null;
-  if (tz == null) return { throttle: false, full: true, report: false };
+  if (tz == null) return { throttle: false, full: true, report: false, history: false };
 
   const local = localNow(nowMs, tz);
   const today = localDateOf(local);
@@ -98,5 +101,5 @@ export function heartbeatPlan({ seen, tzOffsetMin, nowMs, forceReport = false })
 
   const lastHb = Number(seen?.['hb'] || 0);
   const throttle = !(report || weekend || recap) && nowMs - lastHb < HEARTBEAT_MIN_INTERVAL_MIN * 60000;
-  return { throttle, full: report || weekend || recap, report };
+  return { throttle, full: report || weekend || recap, report, history: weekend || recap };
 }

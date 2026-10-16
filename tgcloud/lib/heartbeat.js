@@ -4,7 +4,7 @@
 // CRM). Dedupe keys live in `subscribers.seen`, so nothing repeats (and the
 // same call works from a message, a forced /report, or the pulse endpoint).
 import { api } from 'sdk';
-import { fetchWeather, fetchAir } from './weather.js';
+import { fetchWeather, fetchWeatherFull, fetchAir } from './weather.js';
 import { moonInfo } from './moon.js';
 import { riddleOfDay } from './content.js';
 import { dueContacts, dueMemories, dueReminders } from './reminders.js';
@@ -90,8 +90,12 @@ export async function heartbeat(sub, { forceReport = false } = {}) {
   try {
     if (plan.full) {
       // The report also needs the air quality — fetch the two in parallel.
+      // A history run (Friday preview / Sunday recap) needs Open-Meteo's 7
+      // days of past daily data even when OpenWeather serves the forecasts.
       [w, air] = await Promise.all([
-        fetchWeather({ lat: sub.lat, lon: sub.lon, label: sub.city }),
+        plan.history
+          ? fetchWeatherFull({ lat: sub.lat, lon: sub.lon, label: sub.city })
+          : fetchWeather({ lat: sub.lat, lon: sub.lon, label: sub.city }),
         plan.report ? prefetchAir(sub.lat, sub.lon) : Promise.resolve(null),
       ]);
     } else {
@@ -127,7 +131,7 @@ export async function heartbeat(sub, { forceReport = false } = {}) {
       // The plan expected no report (small payload); the fresh offset moved
       // past the cached one (DST edge). Upgrade before building the 3-day list.
       if (w.days.length < w.todayIndex + 4) {
-        w = await fetchWeather({ lat: sub.lat, lon: sub.lon, label: sub.city });
+        w = await fetchWeatherFull({ lat: sub.lat, lon: sub.lon, label: sub.city });
       }
       const rain = rainWindow(w.hourly, nowIso, { hours: 12 });
       if (!air) air = await prefetchAir(sub.lat, sub.lon); // rare: the offset moved since the plan
@@ -181,7 +185,7 @@ export async function heartbeat(sub, { forceReport = false } = {}) {
           // The plan normally requested the full payload already; this guards
           // the rare case where the fresh offset moved past the cached one.
           if (w.days.length < w.todayIndex + 6) {
-            w = await fetchWeather({ lat: sub.lat, lon: sub.lon, label: sub.city });
+            w = await fetchWeatherFull({ lat: sub.lat, lon: sub.lon, label: sub.city });
           }
           await send(key, buildWeekendPreview(w, { name: sub.name }));
         }
@@ -191,7 +195,7 @@ export async function heartbeat(sub, { forceReport = false } = {}) {
         const key = eventKey('recap', today);
         if (!seen[key]) {
           if (w.todayIndex < 7) {
-            w = await fetchWeather({ lat: sub.lat, lon: sub.lon, label: sub.city });
+            w = await fetchWeatherFull({ lat: sub.lat, lon: sub.lon, label: sub.city });
           }
           const text = buildWeeklyRecap(w, { name: sub.name });
           if (text) await send(key, text);
