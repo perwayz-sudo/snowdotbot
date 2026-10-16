@@ -47,6 +47,14 @@ jobs:
           TGCLOUD_TOKEN: ${{ secrets.TGCLOUD_TOKEN }}
           OPENWEATHER_KEY: ${{ secrets.OPENWEATHER_KEY }}
       - name: Pulse once (proves the deploy end-to-end)
-        run: npx tgcloud run endpoints/pulse
+        run: |
+          status=0
+          npx tgcloud run endpoints/pulse > pulse.log 2>&1 || status=$?
+          grep -o 'checked:[0-9]*' pulse.log || echo "no summary line in output"
+          if [ "$status" -ne 0 ]; then
+            echo "pulse failed (exit $status):"
+            sed -E 's/[0-9]{6,}/[redacted]/g' pulse.log
+            exit 1
+          fi
         env:
           TGCLOUD_TOKEN: ${{ secrets.TGCLOUD_TOKEN }}
