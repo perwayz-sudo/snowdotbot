@@ -35,10 +35,16 @@ export async function lookupLabel(lat, lon) {
   return data.city || data.locality || data.principalSubdivision || data.countryName || null;
 }
 
-// The full payload the heartbeat works from: current + 3 days of hourly +
-// 7 days of history + 8 days of daily (today included). Times come back in the
-// city's own zone (timezone=auto), and so does the UTC offset used by 8 AM.
-export async function fetchWeather({ lat, lon, label }) {
+// The forecast payload the heartbeat works from. Two sizes:
+//   full  — current + 3 days of hourly + 7 days of history + 8 days of daily:
+//           needs past days (Sunday recap) and a week ahead (Friday preview).
+//   quick — current + 2 days hourly + 2 days daily, no history: the rain,
+//           temperature, stargazing, UV, workout and commute checks only ever
+//           look from now into the next ~2 days, so this is several times
+//           smaller and that much faster to fetch and parse.
+// Either way, times come back in the city's own zone (timezone=auto), and so
+// does the UTC offset used by 8 AM.
+export async function fetchWeather({ lat, lon, label, quick = false }) {
   const url =
     `${FORECAST_API}?latitude=${lat}&longitude=${lon}` +
     '&current=temperature_2m,apparent_temperature,relative_humidity_2m,wind_speed_10m,weather_code,is_day' +
@@ -46,7 +52,8 @@ export async function fetchWeather({ lat, lon, label }) {
     ',wind_speed_10m,relative_humidity_2m,cloud_cover,uv_index,is_day' +
     '&daily=weather_code,temperature_2m_max,temperature_2m_min,sunrise,sunset' +
     ',precipitation_probability_max,precipitation_sum,uv_index_max,wind_speed_10m_max' +
-    '&timezone=auto&wind_speed_unit=ms&past_days=7&forecast_days=8';
+    '&timezone=auto&wind_speed_unit=ms' +
+    (quick ? '&forecast_days=2' : '&past_days=7&forecast_days=8');
   const data = await getJson(url);
   return normalizeWeather(data, { label });
 }

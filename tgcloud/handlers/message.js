@@ -162,7 +162,7 @@ export default async function (message, ctx) {
   const name = message.from?.first_name || null;
   const reply = (text) => api.sendMessage({ chat_id: chatId, text });
   const show = (text, extra) => api.sendMessage({ chat_id: chatId, text, ...extra });
-  const wx = (sub) => fetchWeather({ lat: sub.lat, lon: sub.lon, label: sub.city });
+  const wx = (sub) => fetchWeather({ lat: sub.lat, lon: sub.lon, label: sub.city, quick: true });
   // The fresh city-local "now" to the minute, from a weather payload.
   const localNowOf = (w) => localIsoMinute(localNow(Date.now(), w.tzOffsetMin));
   let heartbeatDone = false;
@@ -172,8 +172,9 @@ export default async function (message, ctx) {
   const localToday = () => localDateOf(localNow(Date.now(), sub?.tzOffsetMin ?? 0));
 
   // A row for commands that need a city; null (with a nudge) when there is none.
+  // Uses the row already loaded above — nothing in one message run invalidates
+  // it (every mutation below re-assigns `sub` with the fresh row).
   const requireSub = async () => {
-    sub = await getSubscriber(chatId);
     if (!sub || sub.lat == null || sub.lon == null) {
       await reply('📌 First tell me your city — tap 📍 My location in the menu, or send /city <name>.');
       return null;
@@ -195,9 +196,12 @@ export default async function (message, ctx) {
       console.warn('setMyCommands failed', err && err.message);
     }
   };
-  // Remember that an on-demand answer already covered a heartbeat event.
+  // Remember that an on-demand answer already covered a heartbeat event — and
+  // keep the local row in sync so the trailing heartbeat sees it (no re-read).
   const markSeen = async (key) => {
-    await upsertSubscriber(chatId, { seen: { ...(sub?.seen || {}), [key]: Date.now() } });
+    const seen = { ...(sub?.seen || {}), [key]: Date.now() };
+    if (sub) sub.seen = seen;
+    await upsertSubscriber(chatId, { seen });
   };
   const eventList = async () => {
     const rows = await listEvents(chatId);
@@ -372,7 +376,7 @@ export default async function (message, ctx) {
         const s = await requireSub();
         if (s) {
           try {
-            const [w, air] = [await wx(s), await fetchAir(s.lat, s.lon)];
+            const [w, air] = await Promise.all([wx(s), fetchAir(s.lat, s.lon)]);
             await reply(buildAirReply(
               w.label,
               { ...aqiInfo(air.usAqi), pm25: air.pm25, pm10: air.pm10 },
@@ -922,9 +926,8 @@ export default async function (message, ctx) {
       case 'trip': {
         const arg = command.args.trim();
         if (!arg) {
-          const fresh = await getSubscriber(chatId);
-          await reply(fresh?.trip
-            ? `💱 Current trip: ${fresh.trip} — log spends with /spent 25 lunch · close with /trip end`
+          await reply(sub?.trip
+            ? `💱 Current trip: ${sub.trip} — log spends with /spent 25 lunch · close with /trip end`
             : '💱 No active trip. Start one: /trip Tokyo');
           break;
         }
@@ -945,8 +948,7 @@ export default async function (message, ctx) {
           await reply('💰 Usage: /spent 25 lunch — amount first, then what it was.');
           break;
         }
-        const fresh = await getSubscriber(chatId);
-        const trip = fresh?.trip;
+        const trip = sub?.trip;
         if (!trip) {
           await reply('💱 Start a trip first: /trip Tokyo — then /spent 25 lunch.');
           break;
@@ -966,8 +968,7 @@ export default async function (message, ctx) {
           await reply('💰 No expenses yet — start with /trip Tokyo, then /spent 25 lunch.');
           break;
         }
-        const fresh = await getSubscriber(chatId);
-        const currentTrip = fresh?.trip || rows[rows.length - 1].trip;
+        const currentTrip = sub?.trip || rows[rows.length - 1].trip;
         const currentRows = rows.filter((r) => r.trip === currentTrip);
         const total = currentRows.reduce((s, r) => s + r.amount, 0);
         const byCat = {};
@@ -992,12 +993,13 @@ export default async function (message, ctx) {
     }
   }
 
-  // The heartbeat: report + due alerts + reminders for this chat (skipped for /stop).
+  // The heartbeat: report + due alerts + reminders for this chat (skipped for
+  // /stop). The row in hand is current — every mutation above re-assigned it —
+  // so no second read: report, alerts and reminders share this one row.
   if (command?.cmd === 'stop' || heartbeatDone) return;
-  const fresh = await getSubscriber(chatId);
-  if (!fresh || fresh.lat == null || fresh.lon == null) return;
+  if (!sub || sub.lat == null || sub.lon == null) return;
   try {
-    await heartbeat(fresh);
+    await heartbeat(sub);
   } catch (err) {
     console.error('heartbeat failed', err);
   }

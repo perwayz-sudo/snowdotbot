@@ -49,6 +49,7 @@ import {
   minutesBetween,
   eventKey,
   pruneSeen,
+  heartbeatPlan,
 } from './schedule.js';
 import { listContacts, listEvents, listMemories, saveHeartbeat } from './store.js';
 
@@ -61,6 +62,16 @@ function pruneCrmSeen(seen, nowMs) {
   return out;
 }
 
+// AQI is a nice-to-have on the report — never let it fail the run.
+async function prefetchAir(lat, lon) {
+  try {
+    return await fetchAir(lat, lon);
+  } catch (err) {
+    console.warn('air quality fetch failed', err && err.message);
+    return null;
+  }
+}
+
 // Runs the due checks for one subscriber and sends what is due.
 // `forceReport` sends the full report regardless of the hour (used by the
 // /report, /city and /start commands).
@@ -68,15 +79,31 @@ export async function heartbeat(sub, { forceReport = false } = {}) {
   const nowMs = Date.now();
   const sent = [];
 
+  // Cheap decision first: a burst of messages within HEARTBEAT_MIN_INTERVAL_MIN
+  // skips the whole run (network + DB reads); an upcoming report/preview/recap
+  // always goes through and picks the big payload.
+  const plan = heartbeatPlan({ seen: sub.seen, tzOffsetMin: sub.tzOffsetMin, nowMs, forceReport });
+  if (plan.throttle) return { sent, throttled: true };
+
   let w = null;
+  let air = null;
   try {
-    w = await fetchWeather({ lat: sub.lat, lon: sub.lon, label: sub.city });
+    if (plan.full) {
+      // The report also needs the air quality — fetch the two in parallel.
+      [w, air] = await Promise.all([
+        fetchWeather({ lat: sub.lat, lon: sub.lon, label: sub.city }),
+        plan.report ? prefetchAir(sub.lat, sub.lon) : Promise.resolve(null),
+      ]);
+    } else {
+      w = await fetchWeather({ lat: sub.lat, lon: sub.lon, label: sub.city, quick: true });
+    }
   } catch (err) {
     if (forceReport) throw err;
     console.warn('weather fetch failed', err && err.message);
   }
 
   const seen = { ...pruneCrmSeen(sub.seen, nowMs), ...pruneSeen(sub.seen || {}, nowMs) };
+  seen['hb'] = nowMs; // stamps this run for the throttle above
   const send = async (key, text, extra) => {
     await api.sendMessage({ chat_id: sub.chatId, text, ...extra });
     seen[key] = nowMs;
@@ -97,14 +124,14 @@ export async function heartbeat(sub, { forceReport = false } = {}) {
 
     if (forceReport || (hour >= SEND_HOUR && !seen[reportKey])) {
       // --- the full report ---------------------------------------------------
-      const rain = rainWindow(w.hourly, nowIso, { hours: 12 });
-      let aqi = null;
-      try {
-        const air = await fetchAir(sub.lat, sub.lon);
-        aqi = { ...aqiInfo(air.usAqi), pm25: air.pm25 };
-      } catch (err) {
-        console.warn('air quality fetch failed', err && err.message);
+      // The plan expected no report (small payload); the fresh offset moved
+      // past the cached one (DST edge). Upgrade before building the 3-day list.
+      if (w.days.length < w.todayIndex + 4) {
+        w = await fetchWeather({ lat: sub.lat, lon: sub.lon, label: sub.city });
       }
+      const rain = rainWindow(w.hourly, nowIso, { hours: 12 });
+      if (!air) air = await prefetchAir(sub.lat, sub.lon); // rare: the offset moved since the plan
+      const aqi = air ? { ...aqiInfo(air.usAqi), pm25: air.pm25 } : null;
       const text = buildReport(w, {
         name: sub.name,
         moon: moonInfo(nowMs),
@@ -150,12 +177,22 @@ export async function heartbeat(sub, { forceReport = false } = {}) {
 
       if (dow === WEEKEND_DOW && hour >= WEEKEND_HOUR) {
         const key = eventKey('weekend', today);
-        if (!seen[key]) await send(key, buildWeekendPreview(w, { name: sub.name }));
+        if (!seen[key]) {
+          // The plan normally requested the full payload already; this guards
+          // the rare case where the fresh offset moved past the cached one.
+          if (w.days.length < w.todayIndex + 6) {
+            w = await fetchWeather({ lat: sub.lat, lon: sub.lon, label: sub.city });
+          }
+          await send(key, buildWeekendPreview(w, { name: sub.name }));
+        }
       }
 
       if (dow === RECAP_DOW && hour >= RECAP_HOUR) {
         const key = eventKey('recap', today);
         if (!seen[key]) {
+          if (w.todayIndex < 7) {
+            w = await fetchWeather({ lat: sub.lat, lon: sub.lon, label: sub.city });
+          }
           const text = buildWeeklyRecap(w, { name: sub.name });
           if (text) await send(key, text);
           else seen[key] = nowMs;

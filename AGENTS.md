@@ -156,12 +156,14 @@ The platform manages the bot's webhook for you, derived from your deployed
 ## This project — the personal bot (weather + toolkit)
 
 A personal Telegram bot on the serverless platform: a weather report/alerts app
-plus a small toolkit (fun commands, reminders, travel/money helpers). One
-weather fetch per interaction drives the weather side; the reminder extras
-(birthdays, Memory Lane, overdue friends) ride the same heartbeat. Telegram
-Serverless has **no cron** — the user chose "no external scheduler", so "auto"
-means *the next time the bot runs* (any message in the chat, or `npm run pulse`
-if a scheduler is ever added).
+plus a small toolkit (fun commands, reminders, travel/money helpers). Weather
+work is throttled and sized: one small (48 h) Open-Meteo fetch serves a burst
+of interactions, the big payload is only fetched when the report / Friday
+preview / Sunday recap can fire, and the AQI call rides in parallel. The
+reminder extras (birthdays, Memory Lane, overdue friends) ride the same
+heartbeat. Telegram Serverless has **no cron** — the user chose a *git-based*
+one: a GitHub Actions workflow runs `npx tgcloud run endpoints/pulse` every
+30 minutes, so the 08:00 report arrives with no chat activity.
 
 - **`tgcloud/handlers/message.js`** — every command and message. Weather:
   `/start /help /menu /city /report /rain /air /uv /workout /sky /commute
@@ -185,9 +187,14 @@ if a scheduler is ever added).
   stargazing after `STAR_HOUR`; Friday preview; Sunday recap; then the extras —
   event reminders, Memory Lane replays, the weekly CRM nudge), builds the texts
   and records each send in `seen` (`{ "<event>:<stamp>": unixMs }`, pruned to 5
-  days — CRM keys are kept 40 days since they repeat weekly). Weather fetch
-  failures only skip the weather part; reminders still go out.
-- **`lib/schedule.js`** — those hours/days + city-local date math. Pure.
+  days — CRM keys are kept 40 days since they repeat weekly). And it is
+  *cheap*: `heartbeatPlan` decides from the cached offset alone whether the run
+  can be skipped (< `HEARTBEAT_MIN_INTERVAL_MIN` since the last one with
+  nothing time-critical due — anchored by `seen['hb']`) and whether the small
+  or full payload is needed; on report runs the AQI fetch rides in parallel.
+  Weather fetch failures only skip the weather part; reminders still go out.
+- **`lib/schedule.js`** — those hours/days + city-local date math, plus
+  `heartbeatPlan` (throttle + full-vs-quick payload decision). Pure.
 - **`lib/insights.js`** — rain windows, clothing advice, UV/AQI categories,
   workout window, stargazing check, temperature alerts, commute pick. Pure.
 - **`lib/reminders.js`** — `/event add` parsing, occurrence math (recurring
@@ -203,9 +210,13 @@ if a scheduler is ever added).
 - **`lib/format.js`** — every message text. Pure. The report's original block
   follows the user's spec exactly — extras go *below* the 3-day forecast, never
   reformat the block itself.
-- **`lib/weather.js` / `lib/weather-parse.js`** — Open-Meteo forecast (current +
-  3 days hourly + 7 days history + 8 days daily, city-local times), air quality,
-  travel/archive calls; BigDataCloud reverse geocode. All keyless.
+- **`lib/weather.js` / `lib/weather-parse.js`** — Open-Meteo forecast in two
+  sizes: `quick` (48 h, no history — every on-demand command: /rain, /air, /uv,
+  /workout, /sky, /commute and the alert checks) and full (current + 3 days
+  hourly + 7 days history + 8 days daily — the report's 3-day list, the Friday
+  preview, the Sunday recap). City-local times. Plus air quality, travel/
+  archive calls; BigDataCloud reverse geocode. All keyless. `weather-parse` is
+  pure; `weather.js` touches the network only.
 - **`lib/store.js`** — all database access: `subscribers` (+ `saveHeartbeat`,
   `setTrip`), `events`, `expenses`, `memories`, `contacts`, `games`,
   `confessions`.

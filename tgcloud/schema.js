@@ -1,4 +1,4 @@
-import { table, integer, text, real, json } from 'sdk/db';
+import { table, integer, text, real, json, index } from 'sdk/db';
 
 // Your database tables go here as named exports. Deploying this file registers the
 // schema; applying the changes (a migration) updates the database.
@@ -26,7 +26,9 @@ export const events = table('events', {
   kind: text('kind').notNull(),             // 'birthday' | 'anniversary' | 'event'
   date: text('date').notNull(),             // recurring "MM-DD", one-off "YYYY-MM-DD"
   year: integer('year'),                    // set when the year matters (age / how many years)
-});
+}, (t) => ({
+  chatIdx: index('idx_events_chat').on(t.chatId), // the heartbeat lists per chat, every run
+}));
 
 // Travel-budget expenses, one row per spend.
 export const expenses = table('expenses', {
@@ -36,7 +38,9 @@ export const expenses = table('expenses', {
   amount: real('amount').notNull(),
   category: text('category'),               // first word of the note
   note: text('note'),
-});
+}, (t) => ({
+  chatIdx: index('idx_expenses_chat').on(t.chatId),
+}));
 
 // Memory Lane: a photo/video the user sent, replayed on its anniversary.
 export const memories = table('memories', {
@@ -47,7 +51,9 @@ export const memories = table('memories', {
   caption: text('caption'),
   dayKey: text('day_key').notNull(),        // "MM-DD"
   year: integer('year').notNull(),
-});
+}, (t) => ({
+  chatIdx: index('idx_memories_chat').on(t.chatId),
+}));
 
 // Relationship CRM: last contact with friends.
 export const contacts = table('contacts', {
@@ -56,7 +62,9 @@ export const contacts = table('contacts', {
   name: text('name').notNull(),
   intervalDays: integer('interval_days').notNull(), // wanted cadence
   lastContact: integer('last_contact', { mode: 'timestamp' }).notNull(), // Date
-});
+}, (t) => ({
+  chatIdx: index('idx_contacts_chat').on(t.chatId),
+}));
 
 // One active card game per chat.
 export const games = table('games', {
