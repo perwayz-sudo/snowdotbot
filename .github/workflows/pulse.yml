@@ -16,11 +16,14 @@
 # Notes:
 #   - GitHub cron runs in UTC and can be a few minutes late; every 30 minutes
 #     means the report lands shortly after 08:00 city-local time.
+#   - This is a *public* repo, so the schedule runs on the free unlimited
+#     Actions minutes and the logs print only a "checked: N" summary — chat
+#     IDs stay out of the public log (on failure the log is printed with long
+#     numbers redacted).
+#   - If you ever switch this repo to private, calm the cron down to
+#     "0 * * * *" (hourly) — 30-minute runs would eat the free 2,000 min/mo.
 #   - Scheduled workflows are paused after 60 days without repo activity —
 #     re-enable from the Actions tab if that happens.
-#   - Public repos run this many times for free; private repos spend their
-#     Actions minutes (~1 min per run), so switch the cron to "0 * * * *"
-#     (hourly) if you want to be gentle.
 name: pulse
 
 on:
@@ -44,6 +47,14 @@ jobs:
           cache: npm
       - run: npm ci
       - name: Run the heartbeat for every subscriber
-        run: npx tgcloud run endpoints/pulse
+        run: |
+          status=0
+          npx tgcloud run endpoints/pulse > pulse.log 2>&1 || status=$?
+          grep -o 'checked:[0-9]*' pulse.log || echo "no summary line in output"
+          if [ "$status" -ne 0 ]; then
+            echo "pulse failed (exit $status):"
+            sed -E 's/[0-9]{6,}/[redacted]/g' pulse.log
+            exit 1
+          fi
         env:
           TGCLOUD_TOKEN: ${{ secrets.TGCLOUD_TOKEN }}
