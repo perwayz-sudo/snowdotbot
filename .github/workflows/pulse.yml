@@ -1,0 +1,49 @@
+# The "git-based cron": runs the bot's heartbeat on a schedule, so the 8:00
+# morning report (greeting included), rain/temperature alerts and the reminder
+# extras go out even when you're not chatting with the bot.
+#
+# How it works: `tgcloud run` sends this repo's modules to the cloud and runs
+# them there — no deploy needed. The heartbeat sends each event at most once
+# (dedupe lives in the subscribers.seen map), so running the pulse often is
+# safe and exact-minute precision isn't required.
+#
+# Setup (once):
+#   1. Push this repo to GitHub (public or private).
+#   2. Repo → Settings → Secrets and variables → Actions → New repository
+#      secret: name TGCLOUD_TOKEN, value = your CLI access token
+#      (BotFather → your bot → Serverless → CLI Access → Access token).
+#
+# Notes:
+#   - GitHub cron runs in UTC and can be a few minutes late; every 30 minutes
+#     means the report lands shortly after 08:00 city-local time.
+#   - Scheduled workflows are paused after 60 days without repo activity —
+#     re-enable from the Actions tab if that happens.
+#   - Public repos run this many times for free; private repos spend their
+#     Actions minutes (~1 min per run), so switch the cron to "0 * * * *"
+#     (hourly) if you want to be gentle.
+name: pulse
+
+on:
+  schedule:
+    - cron: '*/30 * * * *'
+  workflow_dispatch: {}
+
+# Never let two pulses overlap — parallel runs could double-send.
+concurrency:
+  group: pulse
+  cancel-in-progress: false
+
+jobs:
+  pulse:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - name: Run the heartbeat for every subscriber
+        run: npx tgcloud run endpoints/pulse
+        env:
+          TGCLOUD_TOKEN: ${{ secrets.TGCLOUD_TOKEN }}
